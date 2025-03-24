@@ -9,12 +9,19 @@ public record Message(Type type, String content) {
         EMPTY,
 
         //A response to the action by the client
-        RESPONSE,
+        RESPONSE_USER,
         ERROR,
+        RESPONSE_ADMIN,
 
         //Restricted Access permissions
         SET_ALLOWED_TYPE,
         LOGIN_REQUEST,
+
+        //Do shit with users, ADMIN messages
+        GET_USERS,
+        ADD_USER,
+        DELETE_USER,
+        UPDATE_USER
 
 
     }

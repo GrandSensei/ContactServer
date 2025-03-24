@@ -62,27 +62,32 @@ public class ContactClientGUI extends JFrame {
         loginPanel.add(usernameField);
         loginPanel.add(new JLabel("Password:"));
         loginPanel.add(passwordField);
+        int chances =0;
+        while (chances<10) {
+            int result = JOptionPane.showConfirmDialog(null, loginPanel, "login", JOptionPane.OK_CANCEL_OPTION);
+            if (result == JOptionPane.OK_OPTION) {
+                String username = usernameField.getText();
+                String password = String.valueOf(passwordField.getPassword());
 
-        int result = JOptionPane.showConfirmDialog(null,loginPanel,"login",JOptionPane.OK_CANCEL_OPTION);
-        if (result == JOptionPane.OK_OPTION) {
-            String username = usernameField.getText();
-            String password = String.valueOf(passwordField.getPassword());
+                sendMessage(new Message(Message.Type.LOGIN_REQUEST, username + ":" + password));
+                try {
+                    String response = in.readLine();
+                    Message resp = Message.fromString(response);
+                    if (resp.type() == Message.Type.ERROR) {
+                        JOptionPane.showMessageDialog(this, "Login Failed" + resp.content(), "Login Error", JOptionPane.ERROR_MESSAGE);
+                        ++chances;
+                        continue;
+                    } else if (resp.type() == Message.Type.RESPONSE_USER) {
+                        JOptionPane.showMessageDialog(null, resp.content(), "Login Successful", JOptionPane.INFORMATION_MESSAGE);
+                        return true;
+                    }
 
-            sendMessage(new Message(Message.Type.LOGIN_REQUEST,username+":"+password));
-            try{
-                String response = in.readLine();
-                Message resp= Message.fromString(response);
-                if (resp.type() == Message.Type.ERROR) {
-                    JOptionPane.showMessageDialog(this,"Login Failed"+resp.content(),"Login Error",JOptionPane.ERROR_MESSAGE);
-                    return false;
-                }else if (resp.type() == Message.Type.RESPONSE) {
-                    JOptionPane.showMessageDialog(null,resp.content(),"Login Successful",JOptionPane.INFORMATION_MESSAGE);
-                    return true;
-                }
-            } catch (IOException e) {
-                JOptionPane.showMessageDialog(null,"Login error"+e.getMessage(),"Login Error",JOptionPane.ERROR_MESSAGE);
-                return false;
+            } catch(IOException e){
+                JOptionPane.showMessageDialog(null, "Login error" + e.getMessage(), "Login Error", JOptionPane.ERROR_MESSAGE);
+                ++chances;
             }
+                ++chances;
+        }
         }
         return false;
     }
@@ -199,7 +204,7 @@ public class ContactClientGUI extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 switch (message.type()) {
                     //For listing the contact
-                    case RESPONSE ->{
+                    case RESPONSE_USER ->{
                         contactList.setText("");
                         listingContacts(message.content());
                         //populateContactsFromList();

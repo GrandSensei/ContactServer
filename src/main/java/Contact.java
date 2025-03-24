@@ -10,6 +10,7 @@ public class Contact {
         DISC,
         SUPPLIER,
         CUSTOMER,
+        ADMIN,
     }
 
 

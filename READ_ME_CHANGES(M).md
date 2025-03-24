@@ -34,9 +34,10 @@ and the client having access to a particular type of contact. Right now it is ha
 This also marks the first attempt at transferring to a MySQL database for more robust data management.
 
 S4.7 has introduced server push updates for the contacts. I got to figure out how to understand profilers and understand how much load my server can handle.
-We resolved Delete method.
+We resolved Delete method. 
 Are we done? Are we to resolve all our current bugs, and we are left to do is stress tests this? Is that all after so many of our efforts?
-Perhaps. This marks the end of mark 4 ContactServer. A new generation is to be introduced after this.
+Perhaps. This marks the end of mark 4 ContactServer. A new generation is to be introduced after this...
+
 
 ###### Fixes From Mine ######
 These problems are due to my own code edits arising after the version s.4.
@@ -99,3 +100,30 @@ This results in the UUID getting changed due to how the Class Constructors work.
 
 2.
 QQQ backdoor to shut down the server remotely from another client doesnt work...
+
+
+
+##### NOTES FOR S4.7 #####
+
+Steps for my login mechanism
+
+1. Database creation:
+We create a database to store our users.Each user has an id, username, password which is hashed(idk I think it means encrypt it)(sidenote: it is a
+encrypting mechanism),salt (a random number attached to the end of the password before it is hashed), contact type and the time it was created. 
+We will have the salt integrated in the password, so salt would not be an explicitly written column.
+The salt ensures that same passwords won't have the same hashes. This prevents any attackers from using pre-generated hash databases.
+Btw salts will make our login quite slow, so we will think of something later.
+2. Database Manager:
+The manager will add new user details and search for users based on the login details provided.
+3. User:
+The User has a username, password and contact type which decides their allocation of contacts.
+4. User Registration:
+Currently we are having a class which can be used to add a User to the database. The idea is to create an admin user who has the 
+right to add new users. So no sign-up for normal users to join in.
+5. Server Part:
+In the server we have an authentication phase which asks for username and password. The Server then has a method
+which asks the manager to check if the user exists and if it does assign its type and then perform as usual.
+6. Admin:
+Only the admin is allowed to add/remove from the user Database.
+7. UI:
+Edits were made on how the admin GUI is used in terms of adding and removing users by opening a sub-window to fill in the details

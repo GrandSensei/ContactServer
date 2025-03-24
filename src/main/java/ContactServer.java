@@ -1,9 +1,10 @@
+import org.mindrot.jbcrypt.BCrypt;
+
 import javax.net.ssl.*;
 import java.io.*;
 import java.net.Socket;
 import java.security.KeyStore;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.*;
 
 public class ContactServer {
@@ -11,47 +12,64 @@ public class ContactServer {
     private final ContactManager contactManager;
     private final ExecutorService executorService;
     private final SSLServerSocket sslServerSocket;
+    private final UserManager userManager;
 
     //Keep track of all the clients using the clientHandler
     private final List<ClientHandler> clientHandlerList= new CopyOnWriteArrayList<>();
     public static volatile boolean running = true;
 
+    //Initializes my ContactManager, who will deal with the database stuff
+    //Initializes ExecutorService which manages my thread and concurrency.
+    //Initializes SSLContext, which does the heavy work of setting up my TLS,
+    //Initializes a socket derived from the SSLContext and makes it listen at PORT.
     public ContactServer() throws Exception {
         this.contactManager = new ContactManager();
         this.executorService = Executors.newCachedThreadPool();
         SSLContext sslContext = createSSLContext();
         SSLServerSocketFactory ssf = sslContext.getServerSocketFactory();
         sslServerSocket = (SSLServerSocket) ssf.createServerSocket(PORT);
+        this.userManager = new UserManager();
 
     }
 
+    //Literally does nothing but starts the server class.
     public static void main(String[] args) throws Exception {
         ContactServer server = new ContactServer();
         server.start();
     }
 
-    private SSLContext createSSLContext() throws Exception {
-        // Load the server's keystore containing the private key and certificate.
-        KeyStore keyStore = KeyStore.getInstance("JKS");
-        try (FileInputStream keyStoreIS = new FileInputStream("serverkeystore.jks")) {
-            keyStore.load(keyStoreIS, "changeit".toCharArray());
+    // SSLContext is basically my TLS setup done by Java libraries' yay.
+    private SSLContext createSSLContext() {
+        try {
+            // Load the server's keystore containing the private key and certificate.
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            try (FileInputStream keyStoreIS = new FileInputStream("serverkeystore.jks")) {
+                keyStore.load(keyStoreIS, "changeit".toCharArray());
+            } catch (Exception e) {
+                System.out.println("Error loading serverkeystore.jks");
+            }
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+            kmf.init(keyStore, "changeit".toCharArray());
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(kmf.getKeyManagers(), null, null);
+
+            return sslContext;
+        }catch (Exception e) {
+            System.out.println("Error initializing serverkeystore.jks");
         }
-        KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-        kmf.init(keyStore, "changeit".toCharArray());
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(kmf.getKeyManagers(), null, null);
-        return sslContext;
+        return null;
     }
 
-
+    //Keeps a loop where it checks if someone is knocking at the PORT, and initializing a SSLSocket for the client.
+    //Then it sends the clientSocket along with the contactManager to a clientHandler who does the client interactions
+    //and then the loop resets.
     public void start() {
-
         try {
             System.out.println("TLS Server started on port " + PORT);
             while (running) {
                 SSLSocket clientSocket = (SSLSocket) sslServerSocket.accept();
                 System.out.println("New client connected: " + clientSocket.getInetAddress());
-                ClientHandler clientHandler = new ClientHandler(clientSocket, contactManager, this);
+                ClientHandler clientHandler = new ClientHandler(clientSocket, contactManager, userManager,this);
                 clientHandlerList.add(clientHandler);
                 executorService.execute(clientHandler);
         }
@@ -97,6 +115,7 @@ public class ContactServer {
         private final PrintWriter out;
         private final BufferedReader in;
         private final ContactServer server;
+        private final UserManager userManager;
         ScheduledExecutorService timeoutScheduler = Executors.newScheduledThreadPool(1);
 
         //Something better should be there here na?
@@ -107,9 +126,10 @@ public class ContactServer {
         //Session timeout counter
         private long sessionTimer= System.currentTimeMillis();
 
-        public ClientHandler(SSLSocket socket, ContactManager contactManager, ContactServer server) throws IOException {
+        public ClientHandler(SSLSocket socket, ContactManager contactManager,UserManager userManager ,ContactServer server) throws IOException {
             this.clientSocket = socket;
             this.contactManager = contactManager;
+            this.userManager = userManager;
             this.out = new PrintWriter(socket.getOutputStream(), true);
             this.in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             this.server = server;
@@ -120,17 +140,28 @@ public class ContactServer {
             return username != null && !username.isEmpty() && password != null && !password.isEmpty();
         }
 
+        //Better method for authentication
+        private boolean authenticateUser(String username, String password) {
+            User user = UserManager.findUserByUsername(username);
+            if (user == null) {
+                /*
+                //Something idk but look up
+                BCrypt.hashpw("dummy", BCrypt.gensalt());
+                 */
+                return false;}
+            return BCrypt.checkpw(password, user.getPasswordHash());
+        }
+
         // For demonstration, assign allowed type based on username.
         private Contact.ContactType getAllowedTypeForUser(String username) {
             //Make a function that will go to my User database and get me the required Type.
             //Ideally make a whole new class
-            return switch (username.toLowerCase()) {
-                case "sales" -> Contact.ContactType.SALES;
-                case "tos" -> Contact.ContactType.TOS;
-                case "disc" -> Contact.ContactType.DISC;
-                case "supplier" -> Contact.ContactType.SUPPLIER;
-                default -> Contact.ContactType.CUSTOMER;
-            };
+          User user = UserManager.findUserByUsername(username);
+          if (user == null) {
+              System.err.println("User " + username + " not found");
+              return null;
+          }
+          return user.getContactType();
         }
 
 
@@ -157,7 +188,17 @@ public class ContactServer {
                     String username = credentials[0];
                     String password = credentials[1];
                     //This part should involve my database? prolly
-                    if (validateUser(username, password)) {
+
+                    /*
+                    if(validateUser(username, password)){
+                        allowedType = getAllowedTypeForUser(username);
+                        sendResponse("Logged in");
+                    }
+
+                     */
+
+
+                    if (authenticateUser(username, password)) {
                       allowedType = getAllowedTypeForUser(username);
                       sendResponse("logged in");
                     }else {
@@ -165,6 +206,7 @@ public class ContactServer {
                         cleanup();
                         return;
                     }
+
                 }else {
                     sendError("Invalid request");
                     cleanup();
@@ -210,7 +252,7 @@ public class ContactServer {
                     //Now that I am in my while loop, I will reset it after each time
                     //I handle a message.
                     sessionTimer= System.currentTimeMillis();
-
+                    //Handling the input here.
                     Message message = Message.fromString(input);
                     handleMessage(message);
                     Logger.log(input);
@@ -292,12 +334,69 @@ public class ContactServer {
                     case SEARCH_CONTACTS -> {
                         String query = message.content();
                         StringBuilder result = new StringBuilder();
-                        for (Contact contact : contactManager.searchContacts(query)) {
-                            result.append(contact.toString()).append("\n");
-                            sendResponse(result.toString());
-                            result.setLength(0);
+                        if (allowedType == Contact.ContactType.ADMIN) {
+                            // Admin sees all contacts regardless of search
+                            for (Contact contact : contactManager.getAllContacts()) {
+                                result.append(contact.toString()).append("\n");
+                            }
+                        }else {
+                            for (Contact contact : contactManager.searchContacts(query)) {
+                                result.append(contact.toString()).append("\n");
+                                sendResponse(result.toString());
+                                result.setLength(0);
+                            }
                         }
                     }
+
+                    //Users shit
+                    case GET_USERS -> {
+                        if (allowedType == Contact.ContactType.ADMIN) {
+                            sendUsersList();
+                        } else {
+                            sendError("Permission denied");
+                        }
+                    }
+                    case ADD_USER -> {
+                        if (allowedType == Contact.ContactType.ADMIN) {
+                            String[] parts = message.content().split(":");
+                            if (parts.length != 3) {
+                                sendError("Invalid format: username:password:type");
+                                break;
+                            }
+                            Contact.ContactType type = Contact.ContactType.valueOf(parts[2]);
+                            User user = userManager.registerUser(parts[0],parts[1],type);
+                            if (userManager.createUser(user)){
+                                sendResponse("User created");
+                            } else {
+                                sendError("User creation failed");
+                            }
+                        }
+                    }
+                    case DELETE_USER -> {
+                        if (allowedType == Contact.ContactType.ADMIN) {
+                            if (userManager.deleteUser(message.content())) {
+                                sendResponse("User deleted");
+                            } else {
+                                sendError("User deletion failed");
+                            }
+                        }
+                    }
+                    case UPDATE_USER -> {
+                        if (allowedType == Contact.ContactType.ADMIN) {
+                            String[] parts = message.content().split(":");
+                            if (parts.length != 2) {
+                                sendError("Invalid format: username:newType");
+                                break;
+                            }
+                            Contact.ContactType newType = Contact.ContactType.valueOf(parts[1]);
+                            if (userManager.updateUserType(parts[0], newType)) {
+                                sendResponse("User updated");
+                            } else {
+                                sendError("User update failed");
+                            }
+                        }
+                    }
+
                 }
             } catch (Exception e) {
                 sendError("Error processing request: " + e.getMessage());
@@ -308,7 +407,7 @@ public class ContactServer {
         //Senders, need it because the inputs need a bit of parsing to Message which is cumbersome
         private void sendResponse(String content) {
             try {
-                Message response = new Message(Message.Type.RESPONSE, content);
+                Message response = new Message(Message.Type.RESPONSE_USER, content);
                 out.println(response.toString());
             } catch (Exception e) {
                 System.err.println("Error sending response: " + e.getMessage());
@@ -324,8 +423,13 @@ public class ContactServer {
         }
         private void sendContactsList() {
             StringBuilder result = new StringBuilder();
-
-            for (Contact contact : contactManager.getAllContacts()) {
+            if (allowedType == Contact.ContactType.ADMIN) {
+                for (Contact contact: contactManager.getAllContacts()) {
+                    result.append(contact.toString()).append("/n");
+                }
+            }
+            else {
+                for (Contact contact : contactManager.getAllContacts()) {
                 if (contact.getType() == allowedType) { //  only send contacts matching the allowed type
                     //My stupidity here shone when I used /n instead of \n
                     result.append(contact.toString()).append("/n");
@@ -334,9 +438,25 @@ public class ContactServer {
                 }
                 //sendResponse(result.toString());
                 //result.setLength(0);
+                }
             }
             sendResponse(result.toString());
 
+        }
+        private void sendUsersList() {
+            try {
+                StringBuilder sb = new StringBuilder();
+                for (User user : userManager.getAllUsers()) {
+                    sb.append(user.getUsername())
+                            .append(" - ")
+                            .append(user.getContactType())
+                            .append("/n");
+                }
+                Message message = new Message(Message.Type.RESPONSE_ADMIN, sb.toString());
+                out.println(message.toString());
+            }catch (Exception e) {
+                System.err.println("Error sending user list: " + e.getMessage());
+            }
         }
 
         //Final cleanup
